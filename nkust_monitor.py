@@ -8,6 +8,7 @@ import logging
 import json
 import traceback
 import ctypes  # 新增：用於彈出視窗
+import random
 from email.mime.text import MIMEText
 from email.header import Header
 from email.utils import formataddr
@@ -319,7 +320,10 @@ def run_browser_task(conf):
                         if check_count % 10 == 0:
                             logging.info(f"[{time.strftime('%H:%M:%S')}] 無新成績更新")
 
-            time.sleep(60) 
+            wait_time = random.randint(45, 90) # 隨機產生 45 到 90 秒之間的數字
+            logging.info(f"[{time.strftime('%H:%M:%S')}] 監控中，下次檢查於 {wait_time} 秒後...")
+            
+            time.sleep(wait_time) 
             driver.refresh()
 
     except Exception as e:

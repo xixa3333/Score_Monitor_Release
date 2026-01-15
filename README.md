@@ -17,6 +17,7 @@
    - 學號 (Student_ID)
    - 密碼 (Student_Password)
    - 接收通知的信箱 (Target_Email)
+   - 取得應用程式密碼設定Email通知，底下有設定方法
 4. 點擊執行 `.exe` 檔案。
 5. 視窗跳出後請勿關閉，程式將在背景持續運作。
 
