@@ -1,0 +1,20 @@
+# 忽略個人設定檔 (絕對不能上傳)
+config.txt
+
+# 忽略執行時產生的紀錄檔
+system_log.txt
+grade_history.json
+*.log
+
+# 忽略截圖
+*.png
+
+# 忽略編譯後的 Python 暫存檔
+__pycache__/
+*.pyc
+
+# 忽略打包出來的執行檔 (GitHub 通常放原始碼，執行檔放 Release 區)
+dist/
+build/
+*.spec
+*.exe
