@@ -30,10 +30,9 @@ logging.basicConfig(
 )
 
 # ================= 寄件者設定 =================
-ENCRYPTED_SMTP_PASS = ""  
+ENCRYPTED_SMTP_PASS = "cGt2diB4cGVyIG10aGUgb3l3Zg=="  
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
-SMTP_USER = "3333xixa3333@gmail.com"
 SENDER_NAME = "高科成績通知系統"
 HISTORY_FILE = "grade_history.json"
 
@@ -110,65 +109,54 @@ def save_history(grades):
     except Exception as e:
         logging.error(f"無法儲存成績紀錄: {e}")
 
-# ================= 郵件發送 =================
-def send_grade_update_email(target_email, new_grades):
+def get_config():
+    """讀取設定檔"""
+    config = configparser.ConfigParser()
+    if not os.path.exists('config.txt'):
+        show_alert("設定檔遺失", "找不到 config.txt 設定檔！")
+        os._exit(0)
+    try:
+        config.read('config.txt', encoding='utf-8')
+        return {
+            "id": config['User']['Student_ID'],
+            "pwd": config['User']['Student_Password'],
+            "email": config['Email']['My_Gmail'],
+            "app_pw": config['Email']['App_Password']
+        }
+    except Exception as e:
+        show_alert("設定檔錯誤", f"讀取 config.txt 失敗，請確認格式正確。\n錯誤內容: {e}")
+        os._exit(0)
+
+# ================= 郵件發送 (使用者自寄自收) =================
+def send_grade_update_email(conf, new_grades):
     subject = "【成績通知】有新的成績公布了！"
     rows_html = ""
-    
-    for subject_name, score_text in new_grades:
-        comment = ""
-        score_color = "black"
+    for subj, score in new_grades:
+        comment, color = "", "black"
         try:
-            score_val = float(score_text)
-            if score_val < 60:
-                comment = "不好意思老師這次撈不動 😭"
-                score_color = "red"
-            else:
-                comment = "恭喜你被老師撈撈上岸了 🎉"
-                score_color = "green"
-        except ValueError:
-            comment = "" 
-            score_color = "blue"
+            val = float(score)
+            if val < 60: comment, color = "不好意思老師這次撈不動 😭", "red"
+            else: comment, color = "恭喜你被老師撈撈上岸了 🎉", "green"
+        except: color = "blue"
+        rows_html += f"<tr><td style='padding:8px;border:1px solid #ddd;'>{subj}</td><td style='padding:8px;border:1px solid #ddd;color:{color};font-weight:bold;'>{score}</td><td style='padding:8px;border:1px solid #ddd;'>{comment}</td></tr>"
 
-        rows_html += f"""
-        <tr>
-            <td style='padding:8px;border:1px solid #ddd;'>{subject_name}</td>
-            <td style='padding:8px;border:1px solid #ddd;color:{score_color};font-weight:bold;'>{score_text}</td>
-            <td style='padding:8px;border:1px solid #ddd;'>{comment}</td>
-        </tr>
-        """
-
-    content = f"""
-    <h3>帥哥/美女你好：</h3>
-    <p>系統偵測到下列科目已有分數：</p>
-    <table style='border-collapse: collapse; width: 100%; max-width: 600px;'>
-        <tr style='background-color: #f2f2f2;'>
-            <th style='padding:8px;border:1px solid #ddd;text-align:left;'>科目名稱</th>
-            <th style='padding:8px;border:1px solid #ddd;text-align:left;'>分數</th>
-            <th style='padding:8px;border:1px solid #ddd;text-align:left;'>系統評語</th>
-        </tr>
-        {rows_html}
-    </table>
-    <br>
-    <p><a href='https://stdsys.nkust.edu.tw/student/Account/Login?ReturnUrl=%2Fstudent'>點此前往校務系統</a></p>
-    """
+    login_url = "https://stdsys.nkust.edu.tw/student/Account/Login?ReturnUrl=%2Fstudent"
+    content = f"<h3>帥哥/美女你好：</h3><p>系統偵測到下列成績：</p><table style='border-collapse: collapse; width: 100%;'>{rows_html}</table><br><p><a href='{login_url}'>點此前往校務系統</a></p>"
+    
     msg = MIMEText(content, 'html', 'utf-8')
     msg['Subject'] = Header(subject, 'utf-8')
-    msg['From'] = formataddr((Header(SENDER_NAME, 'utf-8').encode(), SMTP_USER))
-    msg['To'] = target_email
+    msg['From'] = formataddr((Header("高科成績小幫手", 'utf-8').encode(), conf['email']))
+    msg['To'] = conf['email']
 
     try:
-        real_password = decode_password(ENCRYPTED_SMTP_PASS)
-        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT)
-        server.ehlo()
+        server = smtplib.SMTP("smtp.gmail.com", 587)
         server.starttls()
-        server.ehlo()
-        server.login(SMTP_USER, real_password)
+        server.login(conf['email'], conf['app_pw'])
         server.send_message(msg)
         server.quit()
-        logging.info(f"✅ 已發送成績通知郵件 (共 {len(new_grades)} 科)")
+        logging.info("✅ 成功寄送通知信給自己")
     except Exception as e:
-        logging.error(f"❌ 郵件發送失敗: {e}")
+        logging.error(f"❌ 寄信失敗 (請檢查應用程式密碼): {e}")
 
 def parse_current_grades(driver):
     grades = {}
@@ -187,7 +175,7 @@ def parse_current_grades(driver):
     return grades
 
 # ================= 單次執行任務 (核心邏輯) =================
-def run_browser_task(nkust_id, nkust_pwd, target_email):
+def run_browser_task(conf):
     history_grades = load_history()
     
     options = webdriver.ChromeOptions()
@@ -223,8 +211,8 @@ def run_browser_task(nkust_id, nkust_pwd, target_email):
         
         WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.NAME, "usernameOrEmailAddress"))
-        ).send_keys(nkust_id)
-        driver.find_element(By.NAME, "Password").send_keys(nkust_pwd)
+        ).send_keys(conf['id'])
+        driver.find_element(By.NAME, "Password").send_keys(conf['pwd'])
 
         time.sleep(3) 
         
@@ -325,7 +313,7 @@ def run_browser_task(nkust_id, nkust_pwd, target_email):
                     
                     if new_updates:
                         logging.info(f"🚨 發現 {len(new_updates)} 科新成績！")
-                        send_grade_update_email(target_email, new_updates)
+                        send_grade_update_email(conf, new_updates)
                         save_history(history_grades)
                     else:
                         if check_count % 10 == 0:
@@ -354,10 +342,10 @@ def main():
     check_chrome_installed()
     
     # 2. 獲取帳密
-    nkust_id, nkust_pwd, target_email = get_credentials()
+    conf = get_config()
     
     while True:
-        if run_browser_task(nkust_id, nkust_pwd, target_email) == "RESTART":
+        if run_browser_task(conf) == "RESTART":
             time.sleep(5)
 
 if __name__ == "__main__":
