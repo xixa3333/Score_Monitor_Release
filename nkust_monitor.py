@@ -7,6 +7,7 @@ import sys
 import logging
 import json
 import traceback
+import ctypes  # 新增：用於彈出視窗
 from email.mime.text import MIMEText
 from email.header import Header
 from email.utils import formataddr
@@ -29,23 +30,38 @@ logging.basicConfig(
 )
 
 # ================= 寄件者設定 =================
-ENCRYPTED_SMTP_PASS = ""  # 請使用者自行在 config.txt 設定寄件者密碼
+ENCRYPTED_SMTP_PASS = "cGt2diB4cGVyIG10aGUgb3l3Zg=="  
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
 SMTP_USER = "3333xixa3333@gmail.com"
 SENDER_NAME = "高科成績通知系統"
 HISTORY_FILE = "grade_history.json"
 
+# ================= 系統提示工具 (新增) =================
+def show_alert(title, message):
+    """
+    使用 Windows 原生 API 彈出提示視窗
+    MB_ICONERROR = 0x10
+    """
+    try:
+        ctypes.windll.user32.MessageBoxW(0, message, title, 0x10)
+    except:
+        print(f"[{title}] {message}")
+
 def get_credentials():
     config = configparser.ConfigParser()
     if not os.path.exists('config.txt'):
-        logging.error("找不到 config.txt 設定檔！")
+        msg = "找不到 config.txt 設定檔！請確認檔案是否存在。"
+        logging.error(msg)
+        show_alert("設定檔遺失", msg)
         sys.exit()
     try:
         config.read('config.txt', encoding='utf-8')
         return config['User']['Student_ID'], config['User']['Student_Password'], config['User']['Target_Email']
     except Exception as e:
-        logging.error(f"讀取 config.txt 失敗: {e}")
+        msg = f"讀取 config.txt 失敗，格式可能錯誤。\n錯誤訊息: {e}"
+        logging.error(msg)
+        show_alert("設定檔錯誤", msg)
         sys.exit()
 
 def decode_password(encoded_str):
@@ -71,7 +87,7 @@ def save_history(grades):
     except Exception as e:
         logging.error(f"無法儲存成績紀錄: {e}")
 
-# ================= 郵件發送 (已修改評語邏輯) =================
+# ================= 郵件發送 =================
 def send_grade_update_email(target_email, new_grades):
     subject = "【成績通知】有新的成績公布了！"
     rows_html = ""
@@ -79,8 +95,6 @@ def send_grade_update_email(target_email, new_grades):
     for subject_name, score_text in new_grades:
         comment = ""
         score_color = "black"
-        
-        # 嘗試將分數轉為數字以進行判斷
         try:
             score_val = float(score_text)
             if score_val < 60:
@@ -90,7 +104,6 @@ def send_grade_update_email(target_email, new_grades):
                 comment = "恭喜你被老師撈撈上岸了 🎉"
                 score_color = "green"
         except ValueError:
-            # 如果分數不是數字 (例如: "通過", "抵免"), 就不顯示評語
             comment = "" 
             score_color = "blue"
 
@@ -114,7 +127,7 @@ def send_grade_update_email(target_email, new_grades):
         {rows_html}
     </table>
     <br>
-    <p><a href='https://stdsys.nkust.edu.tw/'>點此前往校務系統</a></p>
+    <p><a href='https://stdsys.nkust.edu.tw/student/Account/Login?ReturnUrl=%2Fstudent'>點此前往校務系統</a></p>
     """
     msg = MIMEText(content, 'html', 'utf-8')
     msg['Subject'] = Header(subject, 'utf-8')
@@ -152,15 +165,10 @@ def parse_current_grades(driver):
 
 # ================= 單次執行任務 (核心邏輯) =================
 def run_browser_task(nkust_id, nkust_pwd, target_email):
-    """
-    這是一個會執行「開啟瀏覽器 -> 登入 -> 監控」的函式。
-    如果需要重啟，這個函式會結束並回傳 'RESTART'。
-    """
-    # 初始化歷史紀錄
     history_grades = load_history()
     
     options = webdriver.ChromeOptions()
-    options.add_argument("--window-size=1200,900") # 設定一個舒服的視窗大小
+    options.add_argument("--window-size=1200,900")
     options.add_argument("--disable-blink-features=AutomationControlled") 
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
@@ -169,7 +177,23 @@ def run_browser_task(nkust_id, nkust_pwd, target_email):
     driver = None
     try:
         logging.info("🚀 啟動瀏覽器視窗...")
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        
+        # ========================================================
+        # ★★★ 新增：攔截 Chrome 未安裝的錯誤 ★★★
+        # ========================================================
+        try:
+            driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        except WebDriverException as e:
+            error_msg = str(e)
+            if "cannot find Chrome binary" in error_msg or "binary is not a Chrome executable" in error_msg:
+                user_msg = "❌ 偵測不到 Google Chrome 瀏覽器！\n\n本程式需要安裝 Chrome 才能運作。\n請前往 Google 官網下載安裝後再重試。"
+                logging.critical("環境錯誤: 未安裝 Chrome")
+                show_alert("環境錯誤", user_msg)
+                sys.exit() # 直接結束程式，不要重啟
+            else:
+                # 其他錯誤則往上拋出，讓外層決定是否重啟
+                raise e
+        # ========================================================
         
         logging.info("前往登入頁面...")
         driver.get("https://stdsys.nkust.edu.tw/student/Account/Login")
@@ -186,17 +210,14 @@ def run_browser_task(nkust_id, nkust_pwd, target_email):
         timeout_seconds = 120 
 
         while True:
-            # 1. 【檢查成功條件】：如果側邊選單 (bi-list) 出現，代表登入成功
             if len(driver.find_elements(By.CLASS_NAME, "bi-list")) > 0:
                 logging.info("✅ 登入成功！(偵測到選單)")
                 break
             
-            # 2. 【檢查超時】：如果超過時間還沒進去，就重啟
             if time.time() - start_time > timeout_seconds:
-                logging.error(f"❌ 登入超時 (超過 {timeout_seconds} 秒)，準備重啟...")
+                logging.error(f"❌ 登入超時，準備重啟...")
                 return "RESTART"
 
-            # 3. 【動作】：嘗試點擊「登入」按鈕
             try:
                 login_btns = driver.find_elements(By.ID, "LoginButton")
                 if len(login_btns) > 0 and login_btns[0].is_displayed():
@@ -208,7 +229,6 @@ def run_browser_task(nkust_id, nkust_pwd, target_email):
             except Exception:
                 pass 
 
-            # 4. 【動作】：嘗試點擊「驗證 OK」彈窗
             try:
                 ok_btns = driver.find_elements(By.CSS_SELECTOR, "button.swal2-confirm")
                 if len(ok_btns) > 0 and ok_btns[0].is_displayed():
@@ -220,7 +240,6 @@ def run_browser_task(nkust_id, nkust_pwd, target_email):
 
             time.sleep(1)
 
-        # 進入成績頁面
         menu_btn = driver.find_element(By.CLASS_NAME, "bi-list")
         driver.execute_script("arguments[0].click();", menu_btn) 
         time.sleep(1)
@@ -244,20 +263,25 @@ def run_browser_task(nkust_id, nkust_pwd, target_email):
         check_count = 0
         while True:
             try:
-                # 檢查瀏覽器是否還活著
                 _ = driver.title 
             except WebDriverException:
                 logging.error("⚠️ 瀏覽器視窗似乎被關閉了。準備重啟...")
                 return "RESTART"
 
-            # 檢查是否被登出 (URL 包含 Login)
             if "Login" in driver.current_url:
                 logging.warning("⚠️ 偵測到被系統自動登出！")
                 logging.warning("🔄 正在準備重新啟動瀏覽器並登入...")
-                return "RESTART" # 回傳重啟訊號，跳出函式
+                return "RESTART"
 
-            # 正常的監控邏輯
             page_source = driver.page_source
+
+            if "An error occurred while processing your request" in page_source:
+                logging.warning("⚠️ 偵測到學校系統錯誤頁面 (Error.)")
+                logging.warning("⏳ 等待 10 秒讓伺服器冷靜，將自動刷新...")
+                time.sleep(10)
+                driver.refresh()
+                continue 
+
             check_count += 1
             
             if "本學期尚無送達成績資料" in page_source:
@@ -288,6 +312,10 @@ def run_browser_task(nkust_id, nkust_pwd, target_email):
             driver.refresh()
 
     except Exception as e:
+        # 如果是 sys.exit() 引發的 SystemExit，直接往上拋，不當作錯誤處理
+        if isinstance(e, SystemExit):
+            raise e
+        
         logging.error(f"執行期間發生錯誤: {e}")
         return "RESTART"
     finally:
@@ -298,25 +326,31 @@ def run_browser_task(nkust_id, nkust_pwd, target_email):
             except:
                 pass
 
-# ================= 主程式 (無限迴圈) =================
+# ================= 主程式 =================
 def main():
-    nkust_id, nkust_pwd, target_email = get_credentials()
-    logging.info(f"程式啟動，使用者: {nkust_id}")
-    print("💡 程式將無限循環執行。若發生登出或錯誤，會自動重啟新視窗。")
-    print("💡 若要完全關閉程式，請直接關閉此黑色視窗 (CMD)。")
-
-    while True:
-        # 執行任務
-        status = run_browser_task(nkust_id, nkust_pwd, target_email)
+    try:
+        nkust_id, nkust_pwd, target_email = get_credentials()
+        logging.info(f"程式啟動，使用者: {nkust_id}")
+        print("💡 程式將無限循環執行。若發生登出或錯誤，會自動重啟新視窗。")
         
-        if status == "RESTART":
-            logging.info("⏳ 等待 5 秒後重新啟動系統...")
-            time.sleep(5)
-            logging.info("🔄 正在重新啟動...")
-            continue # 跳回迴圈開頭，重新執行 run_browser_task
-        else:
-            logging.info("程式意外結束，5 秒後重試...")
-            time.sleep(5)
+        while True:
+            status = run_browser_task(nkust_id, nkust_pwd, target_email)
+            
+            if status == "RESTART":
+                logging.info("⏳ 等待 5 秒後重新啟動系統...")
+                time.sleep(5)
+                logging.info("🔄 正在重新啟動...")
+                continue 
+            else:
+                logging.info("程式意外結束，5 秒後重試...")
+                time.sleep(5)
+    except SystemExit:
+        # 正常退出
+        pass
+    except Exception as e:
+        # 捕捉最外層錯誤，確保視窗不會秒關，讓使用者看到 Log
+        logging.critical(f"嚴重錯誤: {e}")
+        input("按 Enter 結束...")
 
 if __name__ == "__main__":
     main()
