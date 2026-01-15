@@ -30,7 +30,7 @@ logging.basicConfig(
 )
 
 # ================= 寄件者設定 =================
-ENCRYPTED_SMTP_PASS = "cGt2diB4cGVyIG10aGUgb3l3Zg=="  
+ENCRYPTED_SMTP_PASS = ""  
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
 SMTP_USER = "3333xixa3333@gmail.com"
