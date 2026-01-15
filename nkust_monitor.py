@@ -48,6 +48,29 @@ def show_alert(title, message):
     except:
         print(f"[{title}] {message}")
 
+# ================= 新增：主動檢查 Chrome 是否安裝 =================
+def check_chrome_installed():
+    """檢查電腦是否安裝了 Google Chrome"""
+    # 預設的幾個 Chrome 安裝路徑
+    paths = [
+        os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe")
+    ]
+    
+    found = any(os.path.exists(p) for p in paths)
+    
+    # 測試模式：如果你想測試彈窗，可以把這裡改為 found = False
+    # found = False 
+
+    if not found:
+        msg = "❌ 偵測不到 Google Chrome 瀏覽器！\n\n本程式需要安裝 Chrome 才能運作。\n請前往 Google 官網下載安裝後再重新執行。"
+        logging.critical("環境錯誤: 未安裝 Chrome")
+        show_alert("環境錯誤", msg)
+        os._exit(0) # 徹底強制結束
+
+# =============================================================
+
 def get_credentials():
     config = configparser.ConfigParser()
     if not os.path.exists('config.txt'):
@@ -189,7 +212,7 @@ def run_browser_task(nkust_id, nkust_pwd, target_email):
                 user_msg = "❌ 偵測不到 Google Chrome 瀏覽器！\n\n本程式需要安裝 Chrome 才能運作。\n請前往 Google 官網下載安裝後再重試。"
                 logging.critical("環境錯誤: 未安裝 Chrome")
                 show_alert("環境錯誤", user_msg)
-                sys.exit() # 直接結束程式，不要重啟
+                os._exit(0) # 直接結束程式，不要重啟
             else:
                 # 其他錯誤則往上拋出，讓外層決定是否重啟
                 raise e
@@ -312,45 +335,30 @@ def run_browser_task(nkust_id, nkust_pwd, target_email):
             driver.refresh()
 
     except Exception as e:
-        # 如果是 sys.exit() 引發的 SystemExit，直接往上拋，不當作錯誤處理
-        if isinstance(e, SystemExit):
-            raise e
-        
-        logging.error(f"執行期間發生錯誤: {e}")
+        error_msg = str(e)
+        # ★★★ 核心修正：精確攔截 Selenium 的 Chrome 遺失錯誤 ★★★
+        if "no chrome binary" in error_msg.lower() or "cannot find chrome binary" in error_msg.lower():
+            msg = "❌ 偵測不到 Google Chrome 瀏覽器！\n\n本程式需要安裝 Chrome 才能運作。\n請前往 Google 官網下載安裝後再重新執行。"
+            logging.critical("環境錯誤: Selenium 找不到 Chrome 執行檔")
+            show_alert("環境錯誤", msg)
+            os._exit(0)  # 強制殺掉所有進程，防止 main() 的重啟迴圈
+            
+        logging.error(f"運行錯誤: {e}")
         return "RESTART"
     finally:
-        if driver:
-            try:
-                driver.quit()
-                logging.info("瀏覽器已關閉。")
-            except:
-                pass
+        if driver: driver.quit()
 
 # ================= 主程式 =================
 def main():
-    try:
-        nkust_id, nkust_pwd, target_email = get_credentials()
-        logging.info(f"程式啟動，使用者: {nkust_id}")
-        print("💡 程式將無限循環執行。若發生登出或錯誤，會自動重啟新視窗。")
-        
-        while True:
-            status = run_browser_task(nkust_id, nkust_pwd, target_email)
-            
-            if status == "RESTART":
-                logging.info("⏳ 等待 5 秒後重新啟動系統...")
-                time.sleep(5)
-                logging.info("🔄 正在重新啟動...")
-                continue 
-            else:
-                logging.info("程式意外結束，5 秒後重試...")
-                time.sleep(5)
-    except SystemExit:
-        # 正常退出
-        pass
-    except Exception as e:
-        # 捕捉最外層錯誤，確保視窗不會秒關，讓使用者看到 Log
-        logging.critical(f"嚴重錯誤: {e}")
-        input("按 Enter 結束...")
+    # 1. 執行前先檢查環境
+    check_chrome_installed()
+    
+    # 2. 獲取帳密
+    nkust_id, nkust_pwd, target_email = get_credentials()
+    
+    while True:
+        if run_browser_task(nkust_id, nkust_pwd, target_email) == "RESTART":
+            time.sleep(5)
 
 if __name__ == "__main__":
     main()
