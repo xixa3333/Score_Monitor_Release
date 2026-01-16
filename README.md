@@ -1,4 +1,5 @@
 # NKUST 成績監控小幫手 (NKUST Grade Monitor) 🎓
+![Downloads](https://img.shields.io/github/downloads/xixa3333/Score_Monitor_Release/total)
 
 這是一個自動化的成績查詢工具，專為高科大 (NKUST) 學生設計。它會自動登入校務系統，持續監控成績頁面，一旦發現新成績公布或更新，就會自動寄 Email 通知你！
 
